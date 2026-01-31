@@ -1,8 +1,20 @@
 const express = require("express");
 const sqlite3 = require("sqlite3").verbose();
+const verifySignature = require("./middleware/verifySignature");
+
+const https = require("https");
+const fs = require("fs");
 
 const app = express();
 app.use(express.json());
+
+// ------------------
+// TLS CONFIG
+// ------------------
+const tlsOptions = {
+    key: fs.readFileSync("tls/server.key"),
+    cert: fs.readFileSync("tls/server.crt")
+};
 
 // ------------------
 // DATABASE
@@ -12,7 +24,6 @@ const db = new sqlite3.Database("./data.db", (err) => {
     else console.log("✅ Connected to SQLite database");
 });
 
-// create table (one row per key)
 db.run(`
 CREATE TABLE IF NOT EXISTS payloads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,26 +36,14 @@ CREATE TABLE IF NOT EXISTS payloads (
 // ------------------
 // API: STORE / UPDATE
 // ------------------
-app.post("/API/payload", (req, res) => {
-    const { key, payload } = req.body;
+app.post("/API/payload", verifySignature, (req, res) => {
+    const { vote, evm_public_key } = req.verifiedVote;
 
-    if (!key || !payload) {
-        return res.status(400).json({ error: "key and payload required" });
-    }
+    console.log("Verified vote:", vote);
 
-    const sql = `
-      INSERT INTO payloads (user_id, api_key)
-      VALUES (?, ?)
-      ON CONFLICT(api_key)
-      DO UPDATE SET 
-        user_id = excluded.user_id,
-        created_at = CURRENT_TIMESTAMP
-    `;
-
-    db.run(sql, [payload, key], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-
-        res.json({ message: "Stored / Updated successfully" });
+    res.json({
+        success: true,
+        message: "Payload verified and accepted",
     });
 });
 
@@ -74,7 +73,8 @@ app.post("/API/open_result", (req, res) => {
 });
 
 // ------------------
-app.listen(3000, () => {
-    console.log("🚀 Server running at http://localhost:3000");
+// START HTTPS SERVER
+// ------------------
+https.createServer(tlsOptions, app).listen(3000, () => {
+    console.log("🚀 HTTPS Server running at https://localhost:3000");
 });
-
